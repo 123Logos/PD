@@ -121,6 +121,7 @@ TABLE_STATEMENTS = [
 		address VARCHAR(255),
 		contact_person VARCHAR(64),
 		contact_phone VARCHAR(32),
+		contact_address VARCHAR(255) COMMENT '联系人地址',
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -128,37 +129,62 @@ TABLE_STATEMENTS = [
 	"""
 	CREATE TABLE IF NOT EXISTS pd_deliveries (
 		id BIGINT AUTO_INCREMENT PRIMARY KEY,
-		shipper VARCHAR(64),
-		payee VARCHAR(64),
-		other_fees DECIMAL(14, 2),
-		report_date DATE,
-		driver_phone VARCHAR(32),
-		driver_name VARCHAR(64),
-		vehicle_no VARCHAR(32),
-		product_name VARCHAR(64),
-		contract_no VARCHAR(64),
+		report_date DATE COMMENT '报货日期',
+		delivery_time DATETIME COMMENT '送货时间',
+		warehouse VARCHAR(64) COMMENT '送货库房',
+		target_factory_id BIGINT COMMENT '目标工厂ID（关联pd_customers）',
+		target_factory_name VARCHAR(128) COMMENT '目标工厂名称',
+		product_name VARCHAR(64) COMMENT '货物品种',
+		quantity DECIMAL(12, 3) COMMENT '数量（吨）',
+		vehicle_no VARCHAR(32) COMMENT '车牌号',
+		driver_name VARCHAR(64) COMMENT '司机姓名',
+		driver_phone VARCHAR(32) COMMENT '司机电话',
+		driver_id_card VARCHAR(18) COMMENT '司机身份证号',
+		has_delivery_order ENUM('有', '无') DEFAULT '无' COMMENT '是否有联单',
+		delivery_order_image VARCHAR(255) COMMENT '联单图片路径',
+		source_type ENUM('司机', '公司') DEFAULT '公司' COMMENT '来源：司机/公司',
+		shipper VARCHAR(64) COMMENT '发货人（默认操作人）',
+		payee VARCHAR(64) COMMENT '收款人',
+		service_fee DECIMAL(14, 2) DEFAULT 0 COMMENT '服务费',
+		contract_no VARCHAR(64) COMMENT '关联合同编号',
+		contract_unit_price DECIMAL(12, 2) COMMENT '合同单价',
+		total_amount DECIMAL(14, 2) COMMENT '总价（单价×数量）',
+		status VARCHAR(32) DEFAULT '待确认' COMMENT '状态：待确认/已确认/已完成/已取消',
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-		INDEX idx_deliveries_report_date (report_date),
-		INDEX idx_deliveries_contract_no (contract_no)
-	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+		INDEX idx_report_date (report_date),
+		INDEX idx_contract_no (contract_no),
+		INDEX idx_target_factory (target_factory_id),
+		INDEX idx_vehicle_no (vehicle_no),
+		INDEX idx_status (status)
+	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='销售台账/报货订单';
 	""",
 	"""
 	CREATE TABLE IF NOT EXISTS pd_weighbills (
 		id BIGINT AUTO_INCREMENT PRIMARY KEY,
-		weigh_date DATE,
-		weigh_ticket_no VARCHAR(64),
-		net_weight DECIMAL(12, 3),
-		vehicle_no VARCHAR(32),
-		contract_no VARCHAR(64),
-		unit_price DECIMAL(12, 2),
-		total_amount DECIMAL(14, 2),
+		weigh_date DATE COMMENT '磅单日期',
+		weigh_ticket_no VARCHAR(64) COMMENT '过磅单号',
+		contract_no VARCHAR(64) COMMENT '合同编号（OCR识别）',
+		delivery_id BIGINT COMMENT '关联的报货订单ID（通过日期+车牌匹配）',
+		vehicle_no VARCHAR(32) COMMENT '车牌号',
+		product_name VARCHAR(64) COMMENT '货物名称',
+		gross_weight DECIMAL(12, 3) COMMENT '毛重（吨）',
+		tare_weight DECIMAL(12, 3) COMMENT '皮重（吨）',
+		net_weight DECIMAL(12, 3) COMMENT '净重（吨）',
+		unit_price DECIMAL(12, 2) COMMENT '合同单价',
+		total_amount DECIMAL(14, 2) COMMENT '总价（净重×单价）',
+		weighbill_image VARCHAR(255) COMMENT '磅单图片路径',
+		ocr_status VARCHAR(32) DEFAULT '待确认' COMMENT 'OCR状态：待确认/已确认/已修正',
+		ocr_raw_data TEXT COMMENT 'OCR原始识别文本',
+		is_manual_corrected TINYINT DEFAULT 0 COMMENT '是否人工修正',
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-		INDEX idx_weighbills_weigh_date (weigh_date),
-		INDEX idx_weighbills_vehicle_no (vehicle_no),
-		INDEX idx_weighbills_contract_no (contract_no)
-	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+		INDEX idx_weigh_date (weigh_date),
+		INDEX idx_vehicle_no (vehicle_no),
+		INDEX idx_contract_no (contract_no),
+		INDEX idx_delivery_id (delivery_id),
+		INDEX idx_status (ocr_status)
+	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='磅单表';
 	""",
 	"""
 	CREATE TABLE IF NOT EXISTS pd_weighbill_settlements (
@@ -221,6 +247,65 @@ TABLE_STATEMENTS = [
 		FOREIGN KEY (contract_id) REFERENCES pd_contracts(id) ON DELETE CASCADE,
 		INDEX idx_contract_id (contract_id)
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+	""",
+	# 磅单结余管理
+	"""
+	CREATE TABLE IF NOT EXISTS pd_payment_receipts (
+		id BIGINT AUTO_INCREMENT PRIMARY KEY,
+		receipt_no VARCHAR(64) COMMENT '银行回单流水号',
+		receipt_image VARCHAR(255) NOT NULL COMMENT '回单图片存储路径',
+		payment_date DATE NOT NULL COMMENT '支付日期',
+		payment_time TIME COMMENT '支付时间',
+		payer_name VARCHAR(64) COMMENT '付款人姓名',
+		payer_account VARCHAR(32) COMMENT '付款账号',
+		payee_name VARCHAR(64) NOT NULL COMMENT '收款人姓名（司机）',
+		payee_account VARCHAR(32) COMMENT '收款账号',
+		amount DECIMAL(14, 2) NOT NULL COMMENT '支付金额',
+		bank_name VARCHAR(64) COMMENT '银行名称',
+		remark VARCHAR(255) COMMENT '备注/用途',
+		ocr_status TINYINT DEFAULT 0 COMMENT '0=待确认, 1=已确认, 2=已核销',
+		is_manual_corrected TINYINT DEFAULT 0 COMMENT '0=自动, 1=人工修正',
+		ocr_raw_data TEXT COMMENT 'OCR原始识别文本',
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+		INDEX idx_payee_amount (payee_name, amount),
+		INDEX idx_payment_date (payment_date),
+		INDEX idx_ocr_status (ocr_status)
+	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='支付回单表';
+	""",
+	"""
+	CREATE TABLE IF NOT EXISTS pd_balance_details (
+		id BIGINT AUTO_INCREMENT PRIMARY KEY,
+		contract_no VARCHAR(64) COMMENT '合同编号',
+		delivery_id BIGINT COMMENT '报货订单ID',
+		weighbill_id BIGINT NOT NULL COMMENT '磅单ID',
+		driver_name VARCHAR(64) COMMENT '司机姓名',
+		driver_phone VARCHAR(32) COMMENT '司机电话',
+		vehicle_no VARCHAR(32) COMMENT '车牌号',
+		payable_amount DECIMAL(14, 2) NOT NULL COMMENT '应付金额',
+		paid_amount DECIMAL(14, 2) DEFAULT 0 COMMENT '已支付金额',
+		balance_amount DECIMAL(14, 2) COMMENT '结余金额',
+		payment_status TINYINT DEFAULT 0 COMMENT '0=待支付, 1=部分支付, 2=已结清',
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+		UNIQUE KEY uk_weighbill (weighbill_id),
+		INDEX idx_contract_no (contract_no),
+		INDEX idx_driver_name (driver_name),
+		INDEX idx_payment_status (payment_status),
+		INDEX idx_created_at (created_at)
+	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='磅单结余明细表';
+	""",
+	"""
+	CREATE TABLE IF NOT EXISTS pd_receipt_settlements (
+		id BIGINT AUTO_INCREMENT PRIMARY KEY,
+		receipt_id BIGINT NOT NULL COMMENT '支付回单ID',
+		balance_id BIGINT NOT NULL COMMENT '结余明细ID',
+		settled_amount DECIMAL(14, 2) COMMENT '本次核销金额',
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		UNIQUE KEY uk_receipt_balance (receipt_id, balance_id),
+		INDEX idx_receipt_id (receipt_id),
+		INDEX idx_balance_id (balance_id)
+	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='支付回单与结余核销关联表';
 	""",
 ]
 
