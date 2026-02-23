@@ -491,6 +491,24 @@ class WeighbillService:
             logger.error(f"更新磅单失败: {e}")
             return {"success": False, "error": str(e)}
 
+    def confirm_weighbill(self, bill_id: int) -> Dict[str, Any]:
+        """确认磅单（不标记为已修正）"""
+        try:
+            with get_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "UPDATE pd_weighbills SET ocr_status = %s WHERE id = %s",
+                        ("已确认", bill_id),
+                    )
+                    if cur.rowcount == 0:
+                        return {"success": False, "error": "磅单不存在"}
+
+                    return {"success": True, "message": "磅单已确认"}
+
+        except Exception as e:
+            logger.error(f"确认磅单失败: {e}")
+            return {"success": False, "error": str(e)}
+
     def get_weighbill(self, bill_id: int) -> Optional[Dict]:
         """获取磅单详情"""
         try:
@@ -534,23 +552,23 @@ class WeighbillService:
                     params = []
 
                     if exact_status:
-                        where_clauses.append("ocr_status = %s")
+                        where_clauses.append("w.ocr_status = %s")
                         params.append(exact_status)
 
                     if exact_vehicle_no:
-                        where_clauses.append("vehicle_no = %s")
+                        where_clauses.append("w.vehicle_no = %s")
                         params.append(exact_vehicle_no)
 
                     if exact_contract_no:
-                        where_clauses.append("contract_no = %s")
+                        where_clauses.append("w.contract_no = %s")
                         params.append(exact_contract_no)
 
                     if date_from:
-                        where_clauses.append("weigh_date >= %s")
+                        where_clauses.append("w.weigh_date >= %s")
                         params.append(date_from)
 
                     if date_to:
-                        where_clauses.append("weigh_date <= %s")
+                        where_clauses.append("w.weigh_date <= %s")
                         params.append(date_to)
 
                     if fuzzy_keywords:
@@ -559,8 +577,8 @@ class WeighbillService:
                         for token in tokens:
                             like = f"%{token}%"
                             or_clauses.append(
-                                "(contract_no LIKE %s OR vehicle_no LIKE %s OR product_name LIKE %s "
-                                "OR weigh_ticket_no LIKE %s)"
+                                "(w.contract_no LIKE %s OR w.vehicle_no LIKE %s OR w.product_name LIKE %s "
+                                "OR w.weigh_ticket_no LIKE %s)"
                             )
                             params.extend([like, like, like, like])
                         if or_clauses:
@@ -569,15 +587,23 @@ class WeighbillService:
                     where = "WHERE " + " AND ".join(where_clauses)
 
                     # 总数
-                    cur.execute(f"SELECT COUNT(*) FROM pd_weighbills {where}", tuple(params))
+                    cur.execute(f"SELECT COUNT(*) FROM pd_weighbills w {where}", tuple(params))
                     total = cur.fetchone()[0]
 
                     # 分页
                     offset = (page - 1) * page_size
                     cur.execute(f"""
-                        SELECT * FROM pd_weighbills 
+                        SELECT
+                            w.*,
+                            d.warehouse,
+                            d.target_factory_name,
+                            d.driver_name,
+                            d.driver_phone,
+                            d.driver_id_card
+                        FROM pd_weighbills w
+                        LEFT JOIN pd_deliveries d ON w.delivery_id = d.id
                         {where}
-                        ORDER BY created_at DESC
+                        ORDER BY w.created_at DESC
                         LIMIT %s OFFSET %s
                     """, tuple(params + [page_size, offset]))
 

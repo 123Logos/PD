@@ -1,6 +1,7 @@
 """
 磅单管理路由 - OCR识别 + 自动关联 + 手动修正
 """
+import json
 import os
 import re
 import shutil
@@ -8,8 +9,9 @@ from pathlib import Path
 from typing import Optional, List
 
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Query, Body, Form
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
+from app.services.balance_service import BalanceService, get_balance_service
 from app.services.contract_service import get_conn
 from app.services.weighbill_service import WeighbillService, get_weighbill_service
 
@@ -181,10 +183,11 @@ async def ocr_weighbill(
 
 @router.post("/", response_model=dict)
 async def create_weighbill(
-        request: WeighbillCreateRequest = Body(...),
-        weighbill_image: Optional[UploadFile] = File(None, description="磅单图片（可选，OCR时已传则不用）"),
-        is_manual: bool = Form(True, description="是否人工录入/修正"),
-        service: WeighbillService = Depends(get_weighbill_service)
+    request: Optional[WeighbillCreateRequest] = Body(None),
+    request_json: Optional[str] = Form(None, description="磅单数据JSON字符串"),
+    weighbill_image: Optional[UploadFile] = File(None, description="磅单图片（可选，OCR时已传则不用）"),
+    is_manual: bool = Form(True, description="是否人工录入/修正"),
+    service: WeighbillService = Depends(get_weighbill_service)
 ):
     """
     保存磅单（OCR后确认保存，或纯手动录入）
@@ -193,6 +196,16 @@ async def create_weighbill(
     - 纯手动：直接填写所有字段保存
     """
     try:
+        if request is None:
+            if not request_json:
+                raise HTTPException(status_code=422, detail="缺少磅单数据")
+            try:
+                request = WeighbillCreateRequest(**json.loads(request_json))
+            except json.JSONDecodeError as exc:
+                raise HTTPException(status_code=400, detail=f"request_json不是合法JSON: {exc.msg}")
+            except ValidationError as exc:
+                raise HTTPException(status_code=422, detail=exc.errors())
+
         data = request.dict()
 
         # 如果没有总价但有单价和净重，自动计算
@@ -335,7 +348,8 @@ async def delete_weighbill(
 @router.post("/{bill_id}/confirm")
 async def confirm_weighbill(
         bill_id: int,
-        service: WeighbillService = Depends(get_weighbill_service)
+    service: WeighbillService = Depends(get_weighbill_service),
+    balance_service: BalanceService = Depends(get_balance_service)
 ):
     """
     确认磅单（OCR识别后确认无误）
@@ -345,15 +359,20 @@ async def confirm_weighbill(
     - 触发后续流程（如结算）
     """
     try:
-        result = service.update_weighbill(bill_id, {
-            "ocr_status": "已确认"
-        })
+        result = service.confirm_weighbill(bill_id)
 
         if result["success"]:
             # TODO: 更新关联的报货订单状态
-            # TODO: 触发结算流程
+            balance_result = balance_service.generate_balance_details(weighbill_id=bill_id)
+            if not balance_result.get("success"):
+                raise HTTPException(status_code=400, detail=balance_result.get("error", "结余明细生成失败"))
 
-            return {"success": True, "message": "磅单已确认"}
+            return {
+                "success": True,
+                "message": "磅单已确认",
+                "balance_generated": len(balance_result.get("data", [])),
+                "balance_message": balance_result.get("message"),
+            }
         else:
             raise HTTPException(status_code=400, detail=result.get("error"))
 

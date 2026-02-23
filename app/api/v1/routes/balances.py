@@ -1,6 +1,7 @@
 """
 磅单结余管理 + 支付回单路由（优化版）
 """
+import json
 import os
 import re
 import shutil
@@ -8,7 +9,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Query, Body, Form
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from app.services.balance_service import BalanceService, get_balance_service, UPLOAD_DIR
 
@@ -165,7 +166,8 @@ async def ocr_payment_receipt(
 
 @router.post("/payment-receipts", response_model=dict)
 async def create_payment_receipt(
-        request: PaymentReceiptCreateRequest = Body(...),
+    request: Optional[PaymentReceiptCreateRequest] = Body(None),
+    request_json: Optional[str] = Form(None, description="回单数据JSON字符串"),
         receipt_image: UploadFile = File(..., description="回单图片（必填）"),
         is_manual: bool = Form(True),
         service: BalanceService = Depends(get_balance_service)
@@ -174,6 +176,16 @@ async def create_payment_receipt(
     保存支付回单（OCR后确认或纯手动录入）
     """
     try:
+        if request is None:
+            if not request_json:
+                raise HTTPException(status_code=422, detail="缺少回单数据")
+            try:
+                request = PaymentReceiptCreateRequest(**json.loads(request_json))
+            except json.JSONDecodeError as exc:
+                raise HTTPException(status_code=400, detail=f"request_json不是合法JSON: {exc.msg}")
+            except ValidationError as exc:
+                raise HTTPException(status_code=422, detail=exc.errors())
+
         data = request.dict()
 
         # 保存图片
