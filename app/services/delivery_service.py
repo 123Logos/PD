@@ -15,8 +15,10 @@ from app.services.customer_service import CustomerService
 
 logger = logging.getLogger(__name__)
 
+from app.core.paths import UPLOADS_DIR
+
 # 使用绝对路径，避免工作目录变化导致的问题
-UPLOAD_DIR = Path(__file__).parent.parent.parent / "uploads" / "delivery_orders"
+UPLOAD_DIR = UPLOADS_DIR / "delivery_orders"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 

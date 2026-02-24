@@ -20,11 +20,12 @@ try:
 except ImportError:
     RAPIDOCR_AVAILABLE = False
 
+from app.core.paths import UPLOADS_DIR
 from app.services.contract_service import get_conn
 
 logger = logging.getLogger(__name__)
 
-UPLOAD_DIR = Path("uploads/payment_receipts")
+UPLOAD_DIR = UPLOADS_DIR / "payment_receipts"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
