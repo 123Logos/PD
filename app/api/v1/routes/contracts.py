@@ -17,11 +17,12 @@ from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel, Field
 from datetime import date
 
+from app.core.paths import UPLOADS_DIR
 from app.services.contract_service import ContractService, get_contract_service
 
 router = APIRouter(prefix="/contracts", tags=["合同管理"])
 
-UPLOAD_DIR = Path("uploads/contracts")
+UPLOAD_DIR = UPLOADS_DIR / "contracts"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -43,6 +44,7 @@ class ContractOCRResponse(BaseModel):
     end_date: Optional[str] = None
     smelter_company: Optional[str] = None
     total_quantity: Optional[float] = None
+    truck_count: Optional[float] = None
     arrival_payment_ratio: float = 0.9
     final_payment_ratio: float = 0.1
     products: List[ProductItem] = []
@@ -91,6 +93,7 @@ class ContractOut(BaseModel):
     end_date: Optional[date] = None
     smelter_company: Optional[str] = None
     total_quantity: Optional[float] = None
+    truck_count: Optional[float] = None
     arrival_payment_ratio: float
     final_payment_ratio: float
     status: str

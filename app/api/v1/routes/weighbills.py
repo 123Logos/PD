@@ -12,6 +12,7 @@ from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Query, 
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, ValidationError
 
+from app.core.paths import TEMP_UPLOADS_DIR, UPLOADS_DIR
 from app.services.balance_service import BalanceService, get_balance_service
 from app.services.contract_service import get_conn
 from app.services.weighbill_service import WeighbillService, get_weighbill_service
@@ -149,7 +150,7 @@ async def ocr_weighbill(
     if file.content_type not in allowed_types:
         raise HTTPException(status_code=400, detail="仅支持jpg/png/bmp格式")
 
-    temp_path = Path("uploads/temp") / f"weighbill_{os.urandom(4).hex()}.jpg"
+    temp_path = TEMP_UPLOADS_DIR / f"weighbill_{os.urandom(4).hex()}.jpg"
     temp_path.parent.mkdir(parents=True, exist_ok=True)
 
     try:
@@ -225,7 +226,7 @@ async def create_weighbill(
             file_ext = Path(weighbill_image.filename).suffix.lower() or ".jpg"
             safe_name = re.sub(r'[^\w\-]', '_', data.get("vehicle_no", "unknown"))
             filename = f"weighbill_{safe_name}_{data.get('weigh_date', 'unknown')}{file_ext}"
-            file_path = Path("uploads/weighbills") / filename
+            file_path = UPLOADS_DIR / "weighbills" / filename
 
             # 确保目录存在
             file_path.parent.mkdir(parents=True, exist_ok=True)
