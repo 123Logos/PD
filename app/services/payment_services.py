@@ -316,6 +316,21 @@ class PaymentService:
                     payment_detail_id
                 ))
 
+                conn.commit()  # 添加提交
+
+                # 返回结果
+                return {
+                    "payment_detail_id": payment_detail_id,
+                    "total_amount": float(total_amount),
+                    "paid_amount": float(new_paid),
+                    "unpaid_amount": float(unpaid_amount),
+                    "status": int(new_status),
+                    "status_name": new_status.name,
+                    "current_payment": float(payment_amount),
+                    "payment_stage": int(payment_stage),
+                    "payment_stage_name": payment_stage.name
+                }
+
     @staticmethod
     def list_payment_details(
             page: int = 1,
