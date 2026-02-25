@@ -577,15 +577,17 @@ class BalanceService:
 
                     where_sql = " AND ".join(conditions)
 
+                    where_clause = f"WHERE {where_sql}" if where_sql else ""
+
                     # 总数
-                    cur.execute(f"SELECT COUNT(*) FROM pd_balance_details {where_sql}", tuple(params))
+                    cur.execute(f"SELECT COUNT(*) FROM pd_balance_details {where_clause}", tuple(params))
                     total = cur.fetchone()[0]
 
                     # 分页数据
                     offset = (page - 1) * page_size
                     cur.execute(f"""
                         SELECT * FROM pd_balance_details 
-                        {where_sql}
+                        {where_clause}
                         ORDER BY created_at DESC
                         LIMIT %s OFFSET %s
                     """, tuple(params + [page_size, offset]))
