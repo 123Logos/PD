@@ -575,7 +575,7 @@ class WeighbillService:
                     data = dict(zip(columns, row))
 
                     # 转换时间
-                    for key in ["weigh_date", "delivery_time", "created_at", "updated_at", "uploaded_at"]:  # 新增 uploaded_at
+                    for key in ["weigh_date", "delivery_time", "created_at", "updated_at", "uploaded_at", "payment_schedule_date"]:
                         if data.get(key):
                             data[key] = str(data[key])
 
@@ -596,7 +596,7 @@ class WeighbillService:
         page: int = 1,
         page_size: int = 20,
     ) -> Dict[str, Any]:
-        """查询磅单列表"""
+        """查询磅单列表 - 包含完整的报货订单（台账）信息"""
         try:
             with get_conn() as conn:
                 with conn.cursor() as cur:
@@ -642,18 +642,53 @@ class WeighbillService:
                     cur.execute(f"SELECT COUNT(*) FROM pd_weighbills w {where}", tuple(params))
                     total = cur.fetchone()[0]
 
-                    # 分页
+                    # 分页 - 包含完整的报货订单（台账）字段
                     offset = (page - 1) * page_size
                     cur.execute(f"""
                         SELECT
-                            w.*,
-                            d.warehouse,
-                            d.target_factory_name,
-                            d.driver_name,
-                            d.driver_phone,
-                            d.driver_id_card,
-                            d.shipper,
-                            d.payee
+                            -- 磅单基础字段
+                            w.id,
+                            w.weigh_date,
+                            w.delivery_time,
+                            w.weigh_ticket_no,
+                            w.contract_no,
+                            w.delivery_id,
+                            w.vehicle_no,
+                            w.product_name,
+                            w.gross_weight,
+                            w.tare_weight,
+                            w.net_weight,
+                            w.unit_price,
+                            w.total_amount,
+                            w.weighbill_image,
+                            w.ocr_status,
+                            w.ocr_raw_data,
+                            w.is_manual_corrected,
+                            w.uploader_id,
+                            w.uploader_name,
+                            w.uploaded_at,
+                            w.created_at,
+                            w.updated_at,
+                            w.payment_schedule_date,
+                            -- 报货订单（台账）完整字段
+                            d.report_date AS delivery_report_date,
+                            d.warehouse AS delivery_warehouse,
+                            d.target_factory_id AS delivery_target_factory_id,
+                            d.target_factory_name AS delivery_target_factory_name,
+                            d.quantity AS delivery_quantity,
+                            d.driver_name AS delivery_driver_name,
+                            d.driver_phone AS delivery_driver_phone,
+                            d.driver_id_card AS delivery_driver_id_card,
+                            d.has_delivery_order AS delivery_has_delivery_order,
+                            d.delivery_order_image AS delivery_order_image,
+                            d.source_type AS delivery_source_type,
+                            d.shipper AS delivery_shipper,
+                            d.payee AS delivery_payee,
+                            d.service_fee AS delivery_service_fee,
+                            d.contract_no AS delivery_contract_no,
+                            d.contract_unit_price AS delivery_contract_unit_price,
+                            d.total_amount AS delivery_total_amount,
+                            d.status AS delivery_status
                         FROM pd_weighbills w
                         LEFT JOIN pd_deliveries d ON w.delivery_id = d.id
                         {where}
@@ -666,7 +701,8 @@ class WeighbillService:
                     data = []
                     for row in rows:
                         item = dict(zip(columns, row))
-                        for key in ["weigh_date", "delivery_time", "created_at", "updated_at", "uploaded_at"]:  # 新增 uploaded_at
+                        # 转换时间字段为字符串
+                        for key in ["weigh_date", "delivery_time", "created_at", "updated_at", "uploaded_at", "delivery_report_date"]:
                             if item.get(key):
                                 item[key] = str(item[key])
                         data.append(item)
@@ -683,6 +719,35 @@ class WeighbillService:
             logger.error(f"查询磅单列表失败: {e}")
             return {"success": False, "error": str(e), "data": [], "total": 0}
 
+    def set_payment_schedule_date(self, bill_id: int, payment_schedule_date: str) -> Dict[str, Any]:
+        """设置磅单排款日期"""
+        try:
+            with get_conn() as conn:
+                with conn.cursor() as cur:
+                    # 检查磅单是否存在
+                    cur.execute("SELECT id FROM pd_weighbills WHERE id = %s", (bill_id,))
+                    if not cur.fetchone():
+                        return {"success": False, "error": "磅单不存在"}
+
+                    # 更新排款日期
+                    cur.execute("""
+                        UPDATE pd_weighbills 
+                        SET payment_schedule_date = %s, updated_at = NOW()
+                        WHERE id = %s
+                    """, (payment_schedule_date, bill_id))
+
+                    return {
+                        "success": True,
+                        "message": "排款日期设置成功",
+                        "data": {
+                            "id": bill_id,
+                            "payment_schedule_date": payment_schedule_date
+                        }
+                    }
+
+        except Exception as e:
+            logger.error(f"设置排款日期失败: {e}")
+            return {"success": False, "error": str(e)}
 
 _weighbill_service = None
 

@@ -106,11 +106,13 @@ class WeighbillUpdateRequest(BaseModel):
 
 
 class WeighbillOut(BaseModel):
+    # 磅单基础字段
     id: int
     weigh_date: Optional[str] = None
     delivery_time: Optional[str] = None
     weigh_ticket_no: Optional[str] = None
     contract_no: Optional[str] = None
+    delivery_id: Optional[int] = None
     vehicle_no: Optional[str] = None
     product_name: Optional[str] = None
     gross_weight: Optional[float] = None
@@ -118,16 +120,42 @@ class WeighbillOut(BaseModel):
     net_weight: Optional[float] = None
     unit_price: Optional[float] = None
     total_amount: Optional[float] = None
-    shipper: Optional[str] = None
-    payee: Optional[str] = None
     weighbill_image: Optional[str] = None
     ocr_status: str = "待确认"
+    ocr_raw_data: Optional[str] = None
     is_manual_corrected: int = 0
-    uploader_id: Optional[int] = None  # 新增
-    uploader_name: Optional[str] = None  # 新增
-    uploaded_at: Optional[str] = None  # 新增
+    payment_schedule_date: Optional[str] = None
+    uploader_id: Optional[int] = None
+    uploader_name: Optional[str] = None
+    uploaded_at: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
+
+    # 关联的报货订单（台账）字段
+    shipper: Optional[str] = None
+    payee: Optional[str] = None
+    delivery_report_date: Optional[str] = None
+    delivery_warehouse: Optional[str] = None
+    delivery_target_factory_id: Optional[int] = None
+    delivery_target_factory_name: Optional[str] = None
+    delivery_quantity: Optional[float] = None
+    delivery_driver_name: Optional[str] = None
+    delivery_driver_phone: Optional[str] = None
+    delivery_driver_id_card: Optional[str] = None
+    delivery_has_delivery_order: Optional[str] = None
+    delivery_order_image: Optional[str] = None
+    delivery_source_type: Optional[str] = None
+    delivery_shipper: Optional[str] = None
+    delivery_payee: Optional[str] = None
+    delivery_service_fee: Optional[float] = None
+    delivery_contract_no: Optional[str] = None
+    delivery_contract_unit_price: Optional[float] = None
+    delivery_total_amount: Optional[float] = None
+    delivery_status: Optional[str] = None
+
+
+class PaymentScheduleRequest(BaseModel):
+    payment_schedule_date: str = Field(..., description="排款日期，格式：YYYY-MM-DD")
 
 
 # ============ 路由 ============
@@ -192,12 +220,12 @@ async def ocr_weighbill(
 
 @router.post("/", response_model=dict)
 async def create_weighbill(
-    request: Optional[WeighbillCreateRequest] = Body(None),
-    request_json: Optional[str] = Form(None, description="磅单数据JSON字符串"),
-    weighbill_image: Optional[UploadFile] = File(None, description="磅单图片（可选，OCR时已传则不用）"),
-    is_manual: bool = Form(True, description="是否人工录入/修正"),
-    service: WeighbillService = Depends(get_weighbill_service),
-    current_user: dict = Depends(get_current_user)  # 添加认证依赖获取当前用户
+        request: Optional[WeighbillCreateRequest] = Body(None),
+        request_json: Optional[str] = Form(None, description="磅单数据JSON字符串"),
+        weighbill_image: Optional[UploadFile] = File(None, description="磅单图片（可选，OCR时已传则不用）"),
+        is_manual: bool = Form(True, description="是否人工录入/修正"),
+        service: WeighbillService = Depends(get_weighbill_service),
+        current_user: dict = Depends(get_current_user)  # 添加认证依赖获取当前用户
 ):
     """
     保存磅单（OCR后确认保存，或纯手动录入）
@@ -255,10 +283,10 @@ async def create_weighbill(
 
 @router.get("/", response_model=dict)
 async def list_weighbills(
-    exact_status: Optional[str] = Query(None, description="精确状态：待确认/已确认/已修正"),
-    exact_vehicle_no: Optional[str] = Query(None, description="精确车牌号"),
-    exact_contract_no: Optional[str] = Query(None, description="精确合同编号"),
-    fuzzy_keywords: Optional[str] = Query(None, description="模糊关键词（空格分隔）"),
+        exact_status: Optional[str] = Query(None, description="精确状态：待确认/已确认/已修正"),
+        exact_vehicle_no: Optional[str] = Query(None, description="精确车牌号"),
+        exact_contract_no: Optional[str] = Query(None, description="精确合同编号"),
+        fuzzy_keywords: Optional[str] = Query(None, description="模糊关键词（空格分隔）"),
         date_from: Optional[str] = Query(None, description="开始日期"),
         date_to: Optional[str] = Query(None, description="结束日期"),
         page: int = Query(1, ge=1),
@@ -419,3 +447,24 @@ async def get_weighbill_image(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取图片失败: {str(e)}")
+
+
+@router.put("/{bill_id}/payment-schedule", response_model=dict)
+async def set_payment_schedule(
+        bill_id: int,
+        request: PaymentScheduleRequest,
+        service: WeighbillService = Depends(get_weighbill_service)
+):
+    """设置磅单排款日期"""
+    try:
+        result = service.set_payment_schedule_date(bill_id, request.payment_schedule_date)
+
+        if result["success"]:
+            return result
+        else:
+            raise HTTPException(status_code=400, detail=result.get("error"))
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

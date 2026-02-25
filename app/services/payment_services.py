@@ -315,3 +315,156 @@ class PaymentService:
                     datetime.now(),
                     payment_detail_id
                 ))
+
+    @staticmethod
+    def list_payment_details(
+            page: int = 1,
+            size: int = 20,
+            status: Optional[int] = None,
+            smelter_name: Optional[str] = None,
+            contract_no: Optional[str] = None,
+            start_date: Optional[date] = None,
+            end_date: Optional[date] = None,
+            keyword: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        查询收款明细列表（包含完整的磅单和销售台账信息）
+        """
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                # 构建WHERE条件
+                where_clauses = ["1=1"]
+                params = []
+
+                if status is not None:
+                    where_clauses.append("pd.status = %s")
+                    params.append(status)
+
+                if smelter_name:
+                    where_clauses.append("pd.smelter_name LIKE %s")
+                    params.append(f"%{smelter_name}%")
+
+                if contract_no:
+                    where_clauses.append("pd.contract_no LIKE %s")
+                    params.append(f"%{contract_no}%")
+
+                if start_date:
+                    where_clauses.append("DATE(pd.created_at) >= %s")
+                    params.append(start_date)
+
+                if end_date:
+                    where_clauses.append("DATE(pd.created_at) <= %s")
+                    params.append(end_date)
+
+                if keyword:
+                    where_clauses.append(
+                        "(pd.smelter_name LIKE %s OR pd.contract_no LIKE %s OR pd.material_name LIKE %s)")
+                    keyword_pattern = f"%{keyword}%"
+                    params.extend([keyword_pattern, keyword_pattern, keyword_pattern])
+
+                where_sql = " AND ".join(where_clauses)
+
+                # 查询总数
+                count_sql = f"SELECT COUNT(*) as total FROM {PaymentService.TABLE_NAME} pd WHERE {where_sql}"
+                cur.execute(count_sql, tuple(params))
+                total = cur.fetchone()["total"]
+
+                # 分页查询 - 包含完整的磅单和销售台账字段
+                offset = (page - 1) * size
+                query_sql = f"""
+                    SELECT 
+                        -- 收款明细主表字段
+                        pd.id,
+                        pd.sales_order_id,
+                        pd.smelter_name,
+                        pd.contract_no,
+                        pd.material_name,
+                        pd.unit_price,
+                        pd.net_weight,
+                        pd.total_amount,
+                        pd.paid_amount,
+                        pd.unpaid_amount,
+                        pd.status,
+                        pd.remark,
+                        pd.created_by,
+                        pd.created_at,
+                        pd.updated_at,
+                        -- 磅单表(pd_weighbills)完整字段
+                        wb.id as weighbill_id,
+                        wb.weigh_date,
+                        wb.delivery_time,
+                        wb.weigh_ticket_no,
+                        wb.vehicle_no as weighbill_vehicle_no,
+                        wb.product_name as weighbill_product_name,
+                        wb.gross_weight,
+                        wb.tare_weight,
+                        wb.net_weight as weighbill_net_weight,
+                        wb.unit_price as weighbill_unit_price,
+                        wb.total_amount as weighbill_total_amount,
+                        wb.weighbill_image,
+                        wb.ocr_status,
+                        wb.is_manual_corrected,
+                        wb.payment_schedule_date,
+                        wb.uploader_id as weighbill_uploader_id,
+                        wb.uploader_name as weighbill_uploader_name,
+                        wb.uploaded_at as weighbill_uploaded_at,
+                        -- 销售台账/报货订单(pd_deliveries)完整字段
+                        d.id as delivery_id,
+                        d.report_date,
+                        d.warehouse,
+                        d.target_factory_id,
+                        d.target_factory_name,
+                        d.quantity as delivery_quantity,
+                        d.vehicle_no as delivery_vehicle_no,
+                        d.driver_name,
+                        d.driver_phone,
+                        d.driver_id_card,
+                        d.has_delivery_order,
+                        d.delivery_order_image,
+                        d.source_type,
+                        d.shipper,
+                        d.payee,
+                        d.service_fee,
+                        d.contract_no as delivery_contract_no,
+                        d.contract_unit_price,
+                        d.total_amount as delivery_total_amount,
+                        d.status as delivery_status,
+                        d.uploader_id as delivery_uploader_id,
+                        d.uploader_name as delivery_uploader_name,
+                        d.uploaded_at as delivery_uploaded_at
+                    FROM {PaymentService.TABLE_NAME} pd
+                    LEFT JOIN pd_weighbills wb ON pd.sales_order_id = wb.id
+                    LEFT JOIN pd_deliveries d ON wb.delivery_id = d.id
+                    WHERE {where_sql}
+                    ORDER BY pd.created_at DESC
+                    LIMIT %s OFFSET %s
+                """
+
+                cur.execute(query_sql, tuple(params + [size, offset]))
+                rows = cur.fetchall()
+
+                # 处理数据
+                items = []
+                for row in rows:
+                    item = dict(row)
+
+                    # 转换时间字段为字符串
+                    time_fields = [
+                        'created_at', 'updated_at', 'weigh_date', 'delivery_time',
+                        'weighbill_uploaded_at', 'report_date', 'delivery_uploaded_at'
+                    ]
+                    for field in time_fields:
+                        if item.get(field):
+                            item[field] = str(item[field])
+
+                    # 添加状态名称
+                    item['status_name'] = PaymentStatus(item['status']).name if item.get('status') is not None else None
+
+                    items.append(item)
+
+                return {
+                    "total": total,
+                    "page": page,
+                    "size": size,
+                    "items": items
+                }

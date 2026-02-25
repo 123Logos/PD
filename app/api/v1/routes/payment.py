@@ -8,7 +8,7 @@ from enum import IntEnum
 from core.database import get_conn
 from core.logging import get_logger
 from core.auth import get_current_user
-from services.payment_services import (
+from app.services.payment_services import (
     PaymentService,
     PaymentStatus,
     PaymentStage,
@@ -110,6 +110,51 @@ class PaymentResp(BaseModel):
     remark: Optional[str]
     created_at: datetime
     updated_at: datetime
+
+    # 磅单字段
+    weighbill_id: Optional[int] = None
+    weigh_date: Optional[str] = None
+    delivery_time: Optional[str] = None
+    weigh_ticket_no: Optional[str] = None
+    weighbill_vehicle_no: Optional[str] = None
+    weighbill_product_name: Optional[str] = None
+    gross_weight: Optional[float] = None
+    tare_weight: Optional[float] = None
+    weighbill_net_weight: Optional[float] = None
+    weighbill_unit_price: Optional[float] = None
+    weighbill_total_amount: Optional[float] = None
+    weighbill_image: Optional[str] = None
+    ocr_status: Optional[str] = None
+    is_manual_corrected: Optional[int] = None
+    payment_schedule_date: Optional[str] = None
+    weighbill_uploader_id: Optional[int] = None
+    weighbill_uploader_name: Optional[str] = None
+    weighbill_uploaded_at: Optional[str] = None
+
+    # 销售台账/报货订单字段
+    delivery_id: Optional[int] = None
+    report_date: Optional[str] = None
+    warehouse: Optional[str] = None
+    target_factory_id: Optional[int] = None
+    target_factory_name: Optional[str] = None
+    delivery_quantity: Optional[float] = None
+    delivery_vehicle_no: Optional[str] = None
+    driver_name: Optional[str] = None
+    driver_phone: Optional[str] = None
+    driver_id_card: Optional[str] = None
+    has_delivery_order: Optional[str] = None
+    delivery_order_image: Optional[str] = None
+    source_type: Optional[str] = None
+    shipper: Optional[str] = None
+    payee: Optional[str] = None
+    service_fee: Optional[float] = None
+    delivery_contract_no: Optional[str] = None
+    delivery_contract_unit_price: Optional[float] = None
+    delivery_total_amount: Optional[float] = None
+    delivery_status: Optional[str] = None
+    delivery_uploader_id: Optional[int] = None
+    delivery_uploader_name: Optional[str] = None
+    delivery_uploaded_at: Optional[str] = None
 
 
 class PaymentRecordResp(BaseModel):
