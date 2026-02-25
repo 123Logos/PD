@@ -2,12 +2,13 @@
 磅单结余管理 + 支付回单路由（优化版）
 """
 import json
+import mimetypes
 import os
 import re
 import shutil
 from pathlib import Path
-from typing import List, Optional
-
+from typing import List, Optional, Dict
+from fastapi.responses import FileResponse
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Query, Body, Form
 from pydantic import BaseModel, Field, ValidationError
 
@@ -19,6 +20,7 @@ router = APIRouter(prefix="/balances", tags=["磅单结余管理"])
 # ========== 请求/响应模型 ==========
 
 class PaymentReceiptOCRResponse(BaseModel):
+    """OCR识别响应模型"""
     receipt_no: Optional[str] = None
     payment_date: Optional[str] = None
     payment_time: Optional[str] = None
@@ -26,8 +28,11 @@ class PaymentReceiptOCRResponse(BaseModel):
     payer_account: Optional[str] = None
     payee_name: Optional[str] = None
     payee_account: Optional[str] = None
-    amount: Optional[float] = None
-    bank_name: Optional[str] = None
+    amount: Optional[float] = None           # 转账金额（小写）
+    fee: Optional[float] = 0.0               # 手续费
+    total_amount: Optional[float] = None     # 合计（小写）- 新增
+    bank_name: Optional[str] = None          # 付款行
+    payee_bank_name: Optional[str] = None    # 收款行
     remark: Optional[str] = None
     ocr_message: str = ""
     raw_text: Optional[str] = None
@@ -36,6 +41,7 @@ class PaymentReceiptOCRResponse(BaseModel):
 
 
 class PaymentReceiptCreateRequest(BaseModel):
+    """创建支付回单请求模型"""
     receipt_no: Optional[str] = Field(None, description="回单编号")
     payment_date: str = Field(..., description="支付日期")
     payment_time: Optional[str] = Field(None, description="支付时间")
@@ -43,8 +49,11 @@ class PaymentReceiptCreateRequest(BaseModel):
     payer_account: Optional[str] = Field(None, description="付款账号")
     payee_name: str = Field(..., description="收款人（司机）")
     payee_account: Optional[str] = Field(None, description="收款账号")
-    amount: float = Field(..., description="支付金额")
-    bank_name: Optional[str] = Field(None, description="银行名称")
+    amount: float = Field(..., description="转账金额（小写）")
+    fee: Optional[float] = Field(0.0, description="手续费")
+    total_amount: Optional[float] = Field(None, description="合计金额（小写），不传则自动计算")  # 新增
+    bank_name: Optional[str] = Field(None, description="付款银行")
+    payee_bank_name: Optional[str] = Field(None, description="收款银行")
     remark: Optional[str] = Field(None, description="备注")
 
 
@@ -82,14 +91,21 @@ class PaymentReceiptListOut(BaseModel):
     payer_account: Optional[str] = None
     payee_name: Optional[str] = None
     payee_account: Optional[str] = None
-    amount: Optional[float] = None
+    amount: Optional[float] = None           # 转账金额
+    fee: Optional[float] = None              # 手续费
+    total_amount: Optional[float] = None     # 合计 - 新增
     bank_name: Optional[str] = None
+    payee_bank_name: Optional[str] = None
     remark: Optional[str] = None
     ocr_status: int
     ocr_status_name: str
     is_manual_corrected: int
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
+class PaymentReceiptDetailOut(PaymentReceiptListOut):
+    """支付回单详情（包含核销记录）"""
+    ocr_raw_data: Optional[str] = None
+    settlements: Optional[List[Dict]] = None
 # ========== 路由 ==========
 
 @router.post("/generate")
@@ -131,23 +147,6 @@ async def list_balances(
     )
 
 
-@router.get("/{balance_id}", response_model=BalanceOut)
-async def get_balance(
-        balance_id: int,
-        service: BalanceService = Depends(get_balance_service)
-):
-    """查看结余明细详情（包含支付记录）"""
-    balance = service.get_balance_detail(balance_id)
-    if not balance:
-        raise HTTPException(status_code=404, detail="结余明细不存在")
-
-    # 转换状态为可读字符串
-    status_map = {0: "待支付", 1: "部分支付", 2: "已结清"}
-    balance['payment_status_label'] = status_map.get(balance.get('payment_status'), "未知")
-
-    return balance
-
-
 @router.post("/payment-receipts/ocr", response_model=PaymentReceiptOCRResponse)
 async def ocr_payment_receipt(
         file: UploadFile = File(..., description="支付回单图片"),
@@ -155,7 +154,6 @@ async def ocr_payment_receipt(
 ):
     """
     OCR识别支付回单
-    TODO: 有待样例图片后完善识别逻辑
     """
     allowed_types = ["image/jpeg", "image/jpg", "image/png", "image/bmp"]
     if file.content_type not in allowed_types:
@@ -285,6 +283,42 @@ async def verify_payment(
         raise HTTPException(status_code=400, detail=result.get("error"))
 
 
+@router.get("/payment-receipts/{receipt_id}/image")
+async def get_payment_receipt_image(
+        receipt_id: int,
+        service: BalanceService = Depends(get_balance_service)
+):
+    """
+    查看支付回单图片
+    """
+    receipt = service.get_payment_receipt(receipt_id)
+    if not receipt:
+        raise HTTPException(status_code=404, detail="支付回单不存在")
+
+    image_path = receipt.get('receipt_image')
+    if not image_path:
+        raise HTTPException(status_code=404, detail="该回单没有图片")
+
+    # 构建完整路径
+    full_path = Path(image_path)
+    if not full_path.is_absolute():
+        # 如果是相对路径，拼接上传目录
+        full_path = UPLOAD_DIR / image_path
+
+    if not full_path.exists():
+        raise HTTPException(status_code=404, detail="图片文件不存在")
+
+    # 自动识别 MIME 类型
+    mime_type, _ = mimetypes.guess_type(str(full_path))
+    if not mime_type:
+        mime_type = "image/jpeg"
+
+    return FileResponse(
+        path=str(full_path),
+        media_type=mime_type,
+        filename=full_path.name
+    )
+
 @router.get("/payment-receipts/{receipt_id}")
 async def get_payment_receipt(
         receipt_id: int,
@@ -336,3 +370,19 @@ async def list_payment_receipts(
         return result
     else:
         raise HTTPException(status_code=500, detail=result.get("error"))
+
+@router.get("/{balance_id}", response_model=BalanceOut)
+async def get_balance(
+        balance_id: int,
+        service: BalanceService = Depends(get_balance_service)
+):
+    """查看结余明细详情（包含支付记录）"""
+    balance = service.get_balance_detail(balance_id)
+    if not balance:
+        raise HTTPException(status_code=404, detail="结余明细不存在")
+
+    # 转换状态为可读字符串
+    status_map = {0: "待支付", 1: "部分支付", 2: "已结清"}
+    balance['payment_status_label'] = status_map.get(balance.get('payment_status'), "未知")
+
+    return balance

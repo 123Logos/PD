@@ -226,7 +226,7 @@ class BalanceService:
     def recognize_payment_receipt(self, image_path: str) -> Dict[str, Any]:
         """
         OCR识别支付回单
-        TODO: 有待样例图片后完善具体识别逻辑
+        支持格式：农业银行等标准转账回单格式
         """
         if not self.ocr:
             return {
@@ -257,19 +257,36 @@ class BalanceService:
             for i, line in enumerate(text_lines):
                 logger.info(f"{i}: {line['text']}")
 
-            # TODO: 有待样例图片后完善解析逻辑
+            # 解析回单字段
+            parsed_data = self._parse_receipt_text(full_text, text_lines)
+
+            # 构造返回数据
             data = {
-                "receipt_no": None,
-                "payment_date": None,
-                "payment_time": None,
-                "payer_name": None,
-                "payer_account": None,
-                "payee_name": None,
-                "payee_account": None,
-                "amount": None,
-                "bank_name": None,
-                "remark": None,
-                "ocr_message": "OCR识别完成，请人工核对填写（待样例图片优化）",
+                # 基础信息
+                "receipt_no": parsed_data.get("receipt_no"),
+                "payment_date": parsed_data.get("payment_date"),
+                "payment_time": parsed_data.get("payment_time"),
+
+                # 金额信息（三个字段）
+                "amount": parsed_data.get("amount"),  # 转账金额（小写）
+                "fee": parsed_data.get("fee", 0.0),  # 手续费
+                "total_amount": parsed_data.get("total_amount"),  # 合计（小写）
+
+                # 付款方信息
+                "payer_name": parsed_data.get("payer_name"),
+                "payer_account": parsed_data.get("payer_account"),
+                "bank_name": parsed_data.get("bank_name"),  # 付款行
+
+                # 收款方信息
+                "payee_name": parsed_data.get("payee_name"),
+                "payee_account": parsed_data.get("payee_account"),
+                "payee_bank_name": parsed_data.get("payee_bank_name"),  # 收款行
+
+                # 其他
+                "remark": parsed_data.get("remark"),
+
+                # 元信息
+                "ocr_message": "识别成功" if parsed_data.get("receipt_no") else "识别完成，部分字段可能需要人工核对",
                 "raw_text": full_text,
                 "ocr_time": round(total_elapse, 3)
             }
@@ -288,18 +305,276 @@ class BalanceService:
                 "ocr_success": False
             }
 
+
+    def _parse_receipt_text(self, full_text: str, text_lines: List[Dict]) -> Dict[str, Any]:
+        """
+        解析回单文本，提取关键字段
+        适配标准银行转账回单格式（农行等）
+        """
+        import re
+
+        result = {}
+        lines = [line["text"] for line in text_lines]
+
+        # 构建位置映射（用于处理跨行字段和表格结构）
+        line_map = {i: line["text"].strip() for i, line in enumerate(text_lines)}
+
+        # ========== 1. 基础信息 ==========
+
+        # 网银流水号
+        receipt_patterns = [
+            r'网银流水号[：:]?\s*(\d{16,20})',
+            r'回单编号[：:]?\s*(\d{16,20})',
+            r'交易单号[：:]?\s*(\d{16,20})',
+            r'流水号[：:]?\s*(\d{16,20})',
+        ]
+        for pattern in receipt_patterns:
+            match = re.search(pattern, full_text)
+            if match:
+                result["receipt_no"] = match.group(1)
+                break
+
+        # 备用：找16-20位数字（排除日期时间）
+        if not result.get("receipt_no"):
+            for line in lines:
+                nums = re.findall(r'\b(\d{16,20})\b', line)
+                for num in nums:
+                    if not re.match(r'^(20\d{12})$', num):  # 排除时间戳
+                        result["receipt_no"] = num
+                        break
+                if result.get("receipt_no"):
+                    break
+
+        # 交易日期和时间
+        datetime_patterns = [
+            r'交易时间[：:]?\s*(\d{4}[-/年]\d{1,2}[-/月]\d{1,2})[日\s]*(\d{1,2}:\d{2}:\d{2})?',
+            r'(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})',
+        ]
+        for pattern in datetime_patterns:
+            match = re.search(pattern, full_text)
+            if match:
+                date_str = match.group(1).replace('年', '-').replace('月', '-').replace('/', '-').rstrip('-')
+                parts = date_str.split('-')
+                if len(parts) == 3:
+                    date_str = f"{parts[0]}-{int(parts[1]):02d}-{int(parts[2]):02d}"
+                result["payment_date"] = date_str
+                if len(match.groups()) > 1 and match.group(2):
+                    result["payment_time"] = match.group(2)
+                break
+
+        # ========== 2. 金额相关（区分转账金额、手续费、合计） ==========
+
+        # 2.1 转账金额（小写）- 优先匹配"转账金额"关键词
+        transfer_amount = None
+        transfer_patterns = [
+            r'转账金额[（(]小写[）)]?[：:]?\s*[¥￥]?\s*([\d,]+\.?\d{0,2})',
+            r'转账金额[：:]?\s*[¥￥]?\s*([\d,]+\.?\d{0,2})',
+            r'交易金额[：:]?\s*[¥￥]?\s*([\d,]+\.?\d{0,2})',
+            r'汇款金额[：:]?\s*[¥￥]?\s*([\d,]+\.?\d{0,2})',
+        ]
+        for pattern in transfer_patterns:
+            match = re.search(pattern, full_text)
+            if match:
+                amount_str = match.group(1).replace(',', '')
+                try:
+                    transfer_amount = float(amount_str)
+                    result["amount"] = transfer_amount
+                except ValueError:
+                    pass
+                break
+
+        # 2.2 手续费
+        fee_amount = 0.0
+        fee_patterns = [
+            r'手续费[：:]?\s*[¥￥]?\s*([\d,]+\.?\d{0,2})',
+            r'费用[：:]?\s*[¥￥]?\s*([\d,]+\.?\d{0,2})',
+        ]
+        for pattern in fee_patterns:
+            match = re.search(pattern, full_text)
+            if match:
+                fee_str = match.group(1).replace(',', '')
+                try:
+                    fee_amount = float(fee_str)
+                    result["fee"] = fee_amount
+                except ValueError:
+                    pass
+                break
+
+        # 如果没识别到手续费，默认为0
+        if "fee" not in result:
+            result["fee"] = 0.0
+
+        # 2.3 合计（小写）- 新增字段
+        total_amount = None
+        total_patterns = [
+            r'合计[（(]小写[）)]?[：:]?\s*[¥￥]?\s*([\d,]+\.?\d{0,2})',
+            r'合计金额[：:]?\s*[¥￥]?\s*([\d,]+\.?\d{0,2})',
+            r'总计[：:]?\s*[¥￥]?\s*([\d,]+\.?\d{0,2})',
+        ]
+        for pattern in total_patterns:
+            match = re.search(pattern, full_text)
+            if match:
+                total_str = match.group(1).replace(',', '')
+                try:
+                    total_amount = float(total_str)
+                    result["total_amount"] = total_amount
+                except ValueError:
+                    pass
+                break
+
+        # 如果合计没识别到，但识别到了转账金额和手续费，自动计算
+        if total_amount is None and transfer_amount is not None:
+            result["total_amount"] = transfer_amount + fee_amount
+
+        # ========== 3. 付款方信息 ==========
+
+        # 付款户名（处理跨行）
+        payer_name = None
+        for i, line in enumerate(lines):
+            if '账户户名' in line or (line == '付款方' and i < len(lines) - 1):
+                for j in range(i + 1, min(i + 3, len(lines))):
+                    next_line = lines[j].strip()
+                    # 脱敏名：*开源
+                    if re.match(r'^[*＊][\u4e00-\u9fa5a-zA-Z]+$', next_line):
+                        payer_name = next_line.replace('＊', '*')
+                        break
+                    # 纯中文名
+                    elif re.match(r'^[\u4e00-\u9fa5]{2,4}$', next_line) and next_line not in ['收款方', '付款方',
+                                                                                              '开户行']:
+                        payer_name = next_line
+                        break
+            if payer_name:
+                break
+
+        if not payer_name:
+            match = re.search(r'账户户名[：:]?\s*([*＊][\u4e00-\u9fa5]+)', full_text)
+            if match:
+                payer_name = match.group(1).replace('＊', '*')
+
+        if payer_name:
+            result["payer_name"] = payer_name
+
+        # 付款账户（脱敏卡号）
+        payer_account_patterns = [
+            r'付款账户[：:]?\s*(\d{6,8}[*＊]+\d{3,4})',
+            r'付款账号[：:]?\s*(\d{6,8}[*＊]+\d{3,4})',
+        ]
+        for pattern in payer_account_patterns:
+            match = re.search(pattern, full_text)
+            if match:
+                result["payer_account"] = match.group(1).replace('＊', '*')
+                break
+
+        if not result.get("payer_account"):
+            match = re.search(r'(\d{4,6}[*＊]{2,6}\d{3,4})', full_text)
+            if match:
+                result["payer_account"] = match.group(1).replace('＊', '*')
+
+        # ========== 4. 收款方信息 ==========
+
+        # 收款户名
+        payee_name = None
+        for i, line in enumerate(lines):
+            if line == '收款方' and i < len(lines) - 1:
+                for j in range(i + 1, min(i + 3, len(lines))):
+                    next_line = lines[j].strip()
+                    if re.match(r'^[\u4e00-\u9fa5]{2,4}$', next_line) and next_line not in ['付款方', '收款方',
+                                                                                            '开户行', '账户户名']:
+                        payee_name = next_line
+                        break
+                    elif re.match(r'^[*＊][\u4e00-\u9fa5]+$', next_line):
+                        payee_name = next_line.replace('＊', '*')
+                        break
+            if payee_name:
+                break
+
+        if not payee_name:
+            match = re.search(r'收款方[：:]?\s*([\u4e00-\u9fa5]{2,4})', full_text)
+            if match:
+                payee_name = match.group(1)
+
+        if payee_name:
+            result["payee_name"] = payee_name
+
+        # 收款账户（完整卡号）
+        payee_account_patterns = [
+            r'收款账户[：:]?\s*(\d{16,19})',
+            r'收款账号[：:]?\s*(\d{16,19})',
+        ]
+        for pattern in payee_account_patterns:
+            match = re.search(pattern, full_text)
+            if match:
+                result["payee_account"] = match.group(1)
+                break
+
+        if not result.get("payee_account"):
+            all_cards = re.findall(r'\b(\d{16,19})\b', full_text)
+            valid_cards = [c for c in all_cards if 16 <= len(c) <= 19]
+            if valid_cards:
+                result["payee_account"] = valid_cards[0]
+
+        # ========== 5. 银行信息（付款行 + 收款行） ==========
+
+        # 收集所有开户行信息（带位置索引）
+        bank_list = []
+        for i, line in enumerate(lines):
+            if '开户行' in line and i < len(lines) - 1:
+                next_line = lines[i + 1].strip()
+                # 匹配标准银行名称
+                if re.match(r'^[中国工农建邮储交通招商民生中信光大浦发平安华夏兴业广发]+银行', next_line):
+                    bank_list.append({"index": i, "name": next_line})
+
+        # 第一个开户行 = 付款行
+        if len(bank_list) >= 1:
+            result["bank_name"] = bank_list[0]["name"]
+
+        # 第二个开户行 = 收款行（新增字段）
+        if len(bank_list) >= 2:
+            result["payee_bank_name"] = bank_list[1]["name"]
+        else:
+            # 备用：尝试通过"收款方"附近找银行名
+            for i, line in enumerate(lines):
+                if '收款方' in line:
+                    # 向后查找银行名
+                    for j in range(i, min(i + 5, len(lines))):
+                        if re.match(r'^[中国工农建邮储交通招商民生中信光大浦发平安华夏兴业广发]+银行', lines[j]):
+                            result["payee_bank_name"] = lines[j]
+                            break
+                    break
+
+        # ========== 6. 附言/备注 ==========
+
+        remark_patterns = [
+            r'附言[：:]?\s*([^\n]+)',
+            r'备注[：:]?\s*([^\n]+)',
+            r'用途[：:]?\s*([^\n]+)',
+        ]
+        for pattern in remark_patterns:
+            match = re.search(pattern, full_text)
+            if match:
+                remark = match.group(1).strip()
+                if not any(x in remark for x in ['致电商', '客服热线', '不作为', '重要提示', '上列款项']):
+                    result["remark"] = remark
+                    break
+
+        return result
+
+
     def _empty_receipt_result(self, message: str) -> Dict:
         """返回空结果结构"""
         return {
             "receipt_no": None,
             "payment_date": None,
             "payment_time": None,
+            "amount": None,
+            "fee": 0.0,
+            "total_amount": None,  # 新增
             "payer_name": None,
             "payer_account": None,
+            "bank_name": None,
             "payee_name": None,
             "payee_account": None,
-            "amount": None,
-            "bank_name": None,
+            "payee_bank_name": None,
             "remark": None,
             "ocr_message": message,
             "raw_text": "",
@@ -454,14 +729,25 @@ class BalanceService:
                                is_manual: bool = False) -> Dict[str, Any]:
         """创建支付回单记录"""
         try:
+            # 自动计算合计金额（如果未提供）
+            amount = Decimal(str(data.get('amount', 0)))
+            fee = Decimal(str(data.get('fee', 0)))
+            total_amount = data.get('total_amount')
+
+            if total_amount is None:
+                total_amount = amount + fee
+            else:
+                total_amount = Decimal(str(total_amount))
+
             with get_conn() as conn:
                 with conn.cursor() as cur:
                     cur.execute("""
                         INSERT INTO pd_payment_receipts 
                         (receipt_no, receipt_image, payment_date, payment_time,
                          payer_name, payer_account, payee_name, payee_account,
-                         amount, bank_name, remark, ocr_status, ocr_raw_data, is_manual_corrected)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                         amount, fee, total_amount, bank_name, payee_bank_name, remark, 
+                         ocr_status, ocr_raw_data, is_manual_corrected)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """, (
                         data.get('receipt_no'),
                         image_path,
@@ -471,8 +757,11 @@ class BalanceService:
                         data.get('payer_account'),
                         data.get('payee_name'),
                         data.get('payee_account'),
-                        data.get('amount'),
+                        amount,
+                        fee,
+                        total_amount,  # 新增
                         data.get('bank_name'),
+                        data.get('payee_bank_name'),
                         data.get('remark'),
                         self.OCR_STATUS_CONFIRMED if is_manual else self.OCR_STATUS_PENDING,
                         data.get('raw_text'),
@@ -631,22 +920,46 @@ class BalanceService:
             return {"success": False, "error": str(e), "data": [], "total": 0}
 
     def get_payment_receipt(self, receipt_id: int) -> Optional[Dict]:
-        """获取支付回单详情"""
+        """获取支付回单详情（增加新字段）"""
         try:
             with get_conn() as conn:
                 with conn.cursor() as cur:
-                    cur.execute("SELECT * FROM pd_payment_receipts WHERE id = %s", (receipt_id,))
+                    cur.execute("""
+                        SELECT id, receipt_no, receipt_image, payment_date, payment_time,
+                               payer_name, payer_account, payee_name, payee_account,
+                               amount, fee, total_amount, bank_name, payee_bank_name, remark,
+                               ocr_status, is_manual_corrected, ocr_raw_data,
+                               created_at, updated_at
+                        FROM pd_payment_receipts 
+                        WHERE id = %s
+                    """, (receipt_id,))
+
                     row = cur.fetchone()
                     if not row:
                         return None
 
-                    columns = [desc[0] for desc in cur.description]
+                    # 映射字段
+                    columns = ['id', 'receipt_no', 'receipt_image', 'payment_date', 'payment_time',
+                               'payer_name', 'payer_account', 'payee_name', 'payee_account',
+                               'amount', 'fee', 'total_amount', 'bank_name', 'payee_bank_name', 'remark',
+                               'ocr_status', 'is_manual_corrected', 'ocr_raw_data',
+                               'created_at', 'updated_at']
+
                     data = dict(zip(columns, row))
 
                     # 转换时间
                     for key in ['payment_date', 'payment_time', 'created_at', 'updated_at']:
                         if data.get(key):
                             data[key] = str(data[key])
+
+                    # 转换金额
+                    for key in ['amount', 'fee']:
+                        if data.get(key) is not None:
+                            data[key] = float(data[key])
+
+                    # 转换状态
+                    status_map = {0: "待确认", 1: "已确认", 2: "已核销"}
+                    data['ocr_status_label'] = status_map.get(data.get('ocr_status'), "未知")
 
                     # 查询核销的结余明细
                     cur.execute("""
@@ -684,7 +997,7 @@ class BalanceService:
         page: int = 1,
         page_size: int = 20
     ) -> Dict[str, Any]:
-        """查询支付回单列表"""
+        """查询支付回单列表（增加新字段）"""
         try:
             with get_conn() as conn:
                 with conn.cursor() as cur:
@@ -714,9 +1027,9 @@ class BalanceService:
                             like = f"%{token}%"
                             or_clauses.append(
                                 "(receipt_no LIKE %s OR payee_name LIKE %s OR payer_name LIKE %s "
-                                "OR bank_name LIKE %s OR remark LIKE %s)"
+                                "OR bank_name LIKE %s OR payee_bank_name LIKE %s OR remark LIKE %s)"
                             )
-                            params.extend([like, like, like, like, like])
+                            params.extend([like, like, like, like, like, like])
                         if or_clauses:
                             conditions.append("(" + " OR ".join(or_clauses) + ")")
 
@@ -726,25 +1039,41 @@ class BalanceService:
                     cur.execute(f"SELECT COUNT(*) FROM pd_payment_receipts WHERE {where_sql}", tuple(params))
                     total = cur.fetchone()[0]
 
-                    # 分页数据
+                    # 分页数据（增加新字段）
                     offset = (page - 1) * page_size
                     cur.execute(f"""
-                        SELECT * FROM pd_payment_receipts 
+                        SELECT id, receipt_no, receipt_image, payment_date, payment_time,
+                               payer_name, payer_account, payee_name, payee_account,
+                               amount, fee, total_amount, bank_name, payee_bank_name, remark,
+                               ocr_status, is_manual_corrected, created_at, updated_at
+                        FROM pd_payment_receipts 
                         WHERE {where_sql}
                         ORDER BY created_at DESC
                         LIMIT %s OFFSET %s
                     """, tuple(params + [page_size, offset]))
 
-                    columns = [desc[0] for desc in cur.description]
+                    columns = ['id', 'receipt_no', 'receipt_image', 'payment_date', 'payment_time',
+                               'payer_name', 'payer_account', 'payee_name', 'payee_account',
+                               'amount', 'fee', 'total_amount', 'bank_name', 'payee_bank_name', 'remark',
+                               'ocr_status', 'is_manual_corrected', 'created_at', 'updated_at']
+
                     data = []
+                    status_map = {0: "待确认", 1: "已确认", 2: "已核销"}
+
                     for row in cur.fetchall():
                         item = dict(zip(columns, row))
+
                         # 转换时间字段
                         for key in ['payment_date', 'payment_time', 'created_at', 'updated_at']:
                             if item.get(key):
                                 item[key] = str(item[key])
+
+                        # 转换金额
+                        for key in ['amount', 'fee']:
+                            if item.get(key) is not None:
+                                item[key] = float(item[key])
+
                         # 添加状态名称
-                        status_map = {0: "待确认", 1: "已确认", 2: "已核销"}
                         item['ocr_status_name'] = status_map.get(item.get('ocr_status'), "未知")
                         data.append(item)
 

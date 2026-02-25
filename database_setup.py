@@ -268,8 +268,11 @@ TABLE_STATEMENTS = [
 		payer_account VARCHAR(32) COMMENT '付款账号',
 		payee_name VARCHAR(64) NOT NULL COMMENT '收款人姓名（司机）',
 		payee_account VARCHAR(32) COMMENT '收款账号',
-		amount DECIMAL(14, 2) NOT NULL COMMENT '支付金额',
-		bank_name VARCHAR(64) COMMENT '银行名称',
+		amount DECIMAL(14, 2) NOT NULL COMMENT '转账金额（小写）',
+		fee DECIMAL(14, 2) DEFAULT 0.00 COMMENT '手续费',
+		total_amount DECIMAL(14, 2) NOT NULL COMMENT '合计金额（小写）= 转账金额 + 手续费',
+		bank_name VARCHAR(64) COMMENT '付款银行名称',
+		payee_bank_name VARCHAR(64) COMMENT '收款银行名称',
 		remark VARCHAR(255) COMMENT '备注/用途',
 		ocr_status TINYINT DEFAULT 0 COMMENT '0=待确认, 1=已确认, 2=已核销',
 		is_manual_corrected TINYINT DEFAULT 0 COMMENT '0=自动, 1=人工修正',
@@ -278,7 +281,8 @@ TABLE_STATEMENTS = [
 		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 		INDEX idx_payee_amount (payee_name, amount),
 		INDEX idx_payment_date (payment_date),
-		INDEX idx_ocr_status (ocr_status)
+		INDEX idx_ocr_status (ocr_status),
+		INDEX idx_receipt_no (receipt_no)
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='支付回单表';
 	""",
 	"""
