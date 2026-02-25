@@ -161,7 +161,7 @@ class PaymentService:
                 # 检查是否已存在该销售订单的收款明细
                 cur.execute(
                     f"SELECT id FROM {PaymentService.TABLE_NAME} WHERE sales_order_id=%s AND status!=%s",
-                    (sales_order_id, PaymentStatus.OVERPAID)
+                    (sales_order_id, int(PaymentStatus.OVERPAID))
                 )
                 if cur.fetchone():
                     raise ValueError("该销售订单已存在收款明细")
@@ -181,7 +181,7 @@ class PaymentService:
                     "total_amount": float(total_amount),
                     "paid_amount": 0.00,
                     "unpaid_amount": float(total_amount),
-                    "status": PaymentStatus.UNPAID,
+                    "status": int(PaymentStatus.UNPAID),
                     "created_by": created_by,
                     "created_at": datetime.now(),
                     "updated_at": datetime.now()

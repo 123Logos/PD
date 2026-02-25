@@ -116,7 +116,7 @@ class AuthService:
                     where_clause="account=%s AND status!=%s",
                     select_fields=["id", "name", "account", "password_hash", "role", "status", "phone", "email"]
                 )
-                cur.execute(select_sql, (account, UserStatus.DELETED))
+                cur.execute(select_sql, (account, int(UserStatus.DELETED)))
                 user = cur.fetchone()
                 
                 if not user:
@@ -182,7 +182,7 @@ class AuthService:
                 # 检查手机号是否已被使用
                 if phone:
                     cur.execute("SELECT 1 FROM pd_users WHERE phone=%s AND status!=%s LIMIT 1", 
-                               (phone, UserStatus.DELETED))
+                               (phone, int(UserStatus.DELETED)))
                     if cur.fetchone():
                         raise ValueError("手机号已被注册")
                 
@@ -249,7 +249,7 @@ class AuthService:
                     where_clause="account=%s AND status!=%s",
                     select_fields=["id", "name", "account", "role", "phone", "email", "status"]
                 )
-                cur.execute(select_sql, (account, UserStatus.DELETED))
+                cur.execute(select_sql, (account, int(UserStatus.DELETED)))
                 return cur.fetchone()
     
     @staticmethod
@@ -289,7 +289,7 @@ class AuthService:
                 if "phone" in updates and updates["phone"]:
                     cur.execute(
                         "SELECT 1 FROM pd_users WHERE phone=%s AND id!=%s AND status!=%s LIMIT 1",
-                        (updates["phone"], user_id, UserStatus.DELETED)
+                        (updates["phone"], user_id, int(UserStatus.DELETED))
                     )
                     if cur.fetchone():
                         raise ValueError("手机号已被其他用户使用")
@@ -321,7 +321,7 @@ class AuthService:
                 # 获取当前密码哈希
                 cur.execute(
                     "SELECT password_hash FROM pd_users WHERE id=%s AND status!=%s",
-                    (user_id, UserStatus.DELETED)
+                    (user_id, int(UserStatus.DELETED))
                 )
                 row = cur.fetchone()
                 if not row:
@@ -420,7 +420,7 @@ class AuthService:
             with conn.cursor() as cur:
                 # 构建WHERE条件
                 where_conditions = ["status != %s"]
-                params = [UserStatus.DELETED]
+                params = [int(UserStatus.DELETED)]
                 
                 if role:
                     where_conditions.append("role = %s")
