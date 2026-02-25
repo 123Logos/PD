@@ -1,8 +1,25 @@
+import contextvars
 import logging
 import os
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Optional
+
+_current_user = contextvars.ContextVar("current_user", default="-")
+
+
+def set_log_user(user: Optional[str]) -> contextvars.Token:
+    return _current_user.set(user or "-")
+
+
+def reset_log_user(token: contextvars.Token) -> None:
+    _current_user.reset(token)
+
+
+class _UserContextFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.user = _current_user.get()
+        return True
 
 
 def _get_log_dir() -> Path:
@@ -18,7 +35,7 @@ def _get_log_level() -> int:
 
 def _get_formatter() -> logging.Formatter:
     return logging.Formatter(
-        "%(asctime)s %(levelname)s %(name)s %(message)s",
+        "%(asctime)s %(levelname)s %(name)s user=%(user)s %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
@@ -34,10 +51,12 @@ def setup_logging() -> None:
     root.setLevel(level)
 
     formatter = _get_formatter()
+    user_filter = _UserContextFilter()
 
     console_handler = logging.StreamHandler()
     console_handler.setLevel(level)
     console_handler.setFormatter(formatter)
+    console_handler.addFilter(user_filter)
 
     app_file = RotatingFileHandler(
         log_dir / "app.log",
@@ -47,6 +66,7 @@ def setup_logging() -> None:
     )
     app_file.setLevel(level)
     app_file.setFormatter(formatter)
+    app_file.addFilter(user_filter)
 
     error_file = RotatingFileHandler(
         log_dir / "error.log",
@@ -56,6 +76,7 @@ def setup_logging() -> None:
     )
     error_file.setLevel(logging.ERROR)
     error_file.setFormatter(formatter)
+    error_file.addFilter(user_filter)
 
     root.addHandler(console_handler)
     root.addHandler(app_file)
@@ -82,6 +103,7 @@ def _ensure_module_handler(logger: logging.Logger, name: str) -> None:
     )
     module_file.setLevel(level)
     module_file.setFormatter(formatter)
+    module_file.addFilter(_UserContextFilter())
     logger.addHandler(module_file)
 
 

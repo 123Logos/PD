@@ -196,7 +196,7 @@ class AuthService:
                     "account": account,
                     "password_hash": pwd_hash,
                     "role": role,
-                    "status": UserStatus.NORMAL
+                    "status": int(UserStatus.NORMAL)
                 }
                 
                 if phone and "phone" in columns:
