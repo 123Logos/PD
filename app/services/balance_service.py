@@ -81,7 +81,7 @@ class BalanceService:
 
                     where_sql = " AND ".join(conditions)
 
-                    # 查询符合条件的磅单
+                    # 查询符合条件的磅单（增加获取payee和uploader_id）
                     cur.execute(f"""
                         SELECT 
                             w.id as weighbill_id,
@@ -93,7 +93,8 @@ class BalanceService:
                             w.unit_price,
                             d.driver_name,
                             d.driver_phone,
-                            d.payee as payee_name
+                            d.payee,
+                            d.uploader_id
                         FROM pd_weighbills w
                         LEFT JOIN pd_deliveries d ON w.delivery_id = d.id
                         WHERE {where_sql}
@@ -111,30 +112,33 @@ class BalanceService:
                         unit_price = data.get('unit_price') or 0
                         payable = Decimal(str(net_weight)) * Decimal(str(unit_price))
 
-                        # 插入结余明细
+                        # 确定收款人姓名：优先payee，否则driver_name
+                        receiver_name = data.get('payee') if data.get('payee') else data.get('driver_name')
+
+                        # 插入结余明细（增加payee_id）
                         cur.execute("""
                             INSERT INTO pd_balance_details 
                             (contract_no, delivery_id, weighbill_id, driver_name, driver_phone,
-                             vehicle_no, payable_amount, paid_amount, balance_amount, payment_status)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                             vehicle_no, payee_id, payable_amount, paid_amount, balance_amount, payment_status)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         """, (
                             data.get('contract_no'),
                             data.get('delivery_id'),
                             data.get('weighbill_id'),
-                            data.get('driver_name'),
+                            receiver_name,  # 收款人姓名
                             data.get('driver_phone'),
                             data.get('vehicle_no'),
-                            payable,
-                            0,
-                            payable,
+                            data.get('uploader_id'),  # 收款人ID
+                            payable,  # 应付金额
+                            0,  # 已付金额
+                            payable,  # 结余金额
                             self.PAY_STATUS_PENDING
                         ))
 
                         generated.append({
                             'balance_id': cur.lastrowid,
                             'weighbill_id': data.get('weighbill_id'),
-                            'driver_name': data.get('driver_name'),
-                            'payee_name': data.get('payee_name'),
+                            'driver_name': receiver_name,
                             'payable_amount': float(payable)
                         })
 

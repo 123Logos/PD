@@ -20,6 +20,7 @@ class CustomerCreateRequest(BaseModel):
     contact_person: Optional[str] = Field(None, description="联系人", max_length=64)
     contact_phone: Optional[str] = Field(None, description="联系电话", max_length=32)
     contact_address: Optional[str] = Field(None, description="联系人地址", max_length=255)
+    credit_code: Optional[str] = Field(None, description="统一社会信用代码", max_length=32)  # 新增
 
 
 class CustomerUpdateRequest(BaseModel):
@@ -28,6 +29,7 @@ class CustomerUpdateRequest(BaseModel):
     contact_person: Optional[str] = Field(None, description="联系人", max_length=64)
     contact_phone: Optional[str] = Field(None, description="联系电话", max_length=32)
     contact_address: Optional[str] = Field(None, description="联系人地址", max_length=255)
+    credit_code: Optional[str] = Field(None, description="统一社会信用代码", max_length=32)  # 新增
 
 
 class CustomerOut(BaseModel):
@@ -37,6 +39,7 @@ class CustomerOut(BaseModel):
     contact_person: Optional[str] = None
     contact_phone: Optional[str] = None
     contact_address: Optional[str] = None
+    credit_code: Optional[str] = None  # 新增
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 
@@ -76,6 +79,7 @@ async def list_customers(
         exact_smelter_name: Optional[str] = Query(None, description="精确冶炼厂名称"),
         exact_contact_person: Optional[str] = Query(None, description="精确联系人"),
         exact_contact_phone: Optional[str] = Query(None, description="精确联系电话"),
+        exact_credit_code: Optional[str] = Query(None, description="精确统一社会信用代码"),  # 新增
         fuzzy_keywords: Optional[str] = Query(None, description="模糊关键词（空格分隔）"),
         page: int = Query(1, ge=1),
         page_size: int = Query(20, ge=1, le=100),
@@ -86,6 +90,7 @@ async def list_customers(
         exact_smelter_name=exact_smelter_name,
         exact_contact_person=exact_contact_person,
         exact_contact_phone=exact_contact_phone,
+        exact_credit_code=exact_credit_code,  # 新增
         fuzzy_keywords=fuzzy_keywords,
         page=page,
         page_size=page_size,

@@ -28,16 +28,26 @@ class CustomerService:
                     if cur.fetchone():
                         return {"success": False, "error": f"客户 '{data['smelter_name']}' 已存在"}
 
+                    # 检查信用代码是否已存在（如果提供了）
+                    if data.get("credit_code"):
+                        cur.execute(
+                            "SELECT id FROM pd_customers WHERE credit_code = %s",
+                            (data["credit_code"],)
+                        )
+                        if cur.fetchone():
+                            return {"success": False, "error": f"统一社会信用代码 '{data['credit_code']}' 已被使用"}
+
                     cur.execute("""
                         INSERT INTO pd_customers 
-                        (smelter_name, address, contact_person, contact_phone,contact_address)
-                        VALUES (%s, %s, %s, %s, %s)
+                        (smelter_name, address, contact_person, contact_phone, contact_address, credit_code)
+                        VALUES (%s, %s, %s, %s, %s, %s)
                     """, (
                         data.get("smelter_name"),
                         data.get("address"),
                         data.get("contact_person"),
                         data.get("contact_phone"),
                         data.get("contact_address"),
+                        data.get("credit_code"),  # 新增
                     ))
 
                     customer_id = cur.lastrowid
@@ -74,10 +84,21 @@ class CustomerService:
                         if cur.fetchone():
                             return {"success": False, "error": f"客户名称 '{data['smelter_name']}' 已被其他客户使用"}
 
+                    # 如果要修改信用代码，检查是否已被其他客户使用
+                    if data.get("credit_code"):
+                        cur.execute(
+                            "SELECT id FROM pd_customers WHERE credit_code = %s AND id != %s",
+                            (data["credit_code"], customer_id)
+                        )
+                        if cur.fetchone():
+                            return {"success": False,
+                                    "error": f"统一社会信用代码 '{data['credit_code']}' 已被其他客户使用"}
+
                     # 构建更新SQL
                     update_fields = []
                     params = []
-                    fields = ["smelter_name", "address", "contact_person", "contact_phone", "contact_address"]
+                    fields = ["smelter_name", "address", "contact_person", "contact_phone", "contact_address",
+                              "credit_code"]  # 新增 credit_code
 
                     for field in fields:
                         if field in data:
@@ -143,6 +164,7 @@ class CustomerService:
             exact_smelter_name: Optional[str] = None,
             exact_contact_person: Optional[str] = None,
             exact_contact_phone: Optional[str] = None,
+            exact_credit_code: Optional[str] = None,  # 新增参数
             fuzzy_keywords: Optional[str] = None,
             page: int = 1,
             page_size: int = 20
@@ -163,6 +185,9 @@ class CustomerService:
                     if exact_contact_phone:
                         where_clauses.append("contact_phone = %s")
                         params.append(exact_contact_phone)
+                    if exact_credit_code:  # 新增
+                        where_clauses.append("credit_code = %s")
+                        params.append(exact_credit_code)
 
                     if fuzzy_keywords:
                         tokens = [t for t in fuzzy_keywords.split() if t]
@@ -171,9 +196,10 @@ class CustomerService:
                             like = f"%{token}%"
                             or_clauses.append(
                                 "(smelter_name LIKE %s OR contact_person LIKE %s OR contact_phone LIKE %s "
-                                "OR address LIKE %s OR contact_address LIKE %s)"
+                                "OR address LIKE %s OR contact_address LIKE %s OR credit_code LIKE %s)"
+                                # 新增 credit_code
                             )
-                            params.extend([like, like, like, like, like])
+                            params.extend([like, like, like, like, like, like])
                         if or_clauses:
                             where_clauses.append("(" + " OR ".join(or_clauses) + ")")
 

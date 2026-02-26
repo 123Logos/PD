@@ -513,16 +513,18 @@ class WeighbillService:
         try:
             with get_conn() as conn:
                 with conn.cursor() as cur:
-                    # 先获取磅单信息（包括关联的delivery_id）
-                    cur.execute(
-                        "SELECT delivery_id FROM pd_weighbills WHERE id = %s",
-                        (bill_id,),
-                    )
+                    # 先获取磅单信息
+                    cur.execute("""
+                        SELECT w.id, w.delivery_id
+                        FROM pd_weighbills w
+                        WHERE w.id = %s
+                    """, (bill_id,))
+
                     row = cur.fetchone()
                     if not row:
                         return {"success": False, "error": "磅单不存在"}
 
-                    delivery_id = row[0]
+                    weighbill_id, delivery_id = row
 
                     # 更新磅单状态
                     cur.execute(
@@ -538,7 +540,6 @@ class WeighbillService:
                         )
 
                     conn.commit()
-
 
                     return {
                         "success": True,
