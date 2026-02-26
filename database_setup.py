@@ -122,8 +122,11 @@ TABLE_STATEMENTS = [
 		contact_person VARCHAR(64),
 		contact_phone VARCHAR(32),
 		contact_address VARCHAR(255) COMMENT '联系人地址',
+		credit_code VARCHAR(32) COMMENT '统一社会信用代码',
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+		UNIQUE KEY uk_smelter_name (smelter_name),
+		UNIQUE KEY uk_credit_code (credit_code)
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 	""",
 	"""
@@ -294,6 +297,7 @@ TABLE_STATEMENTS = [
 		driver_name VARCHAR(64) COMMENT '司机姓名',
 		driver_phone VARCHAR(32) COMMENT '司机电话',
 		vehicle_no VARCHAR(32) COMMENT '车牌号',
+		payee_id BIGINT COMMENT '收款人ID',
 		payable_amount DECIMAL(14, 2) NOT NULL COMMENT '应付金额',
 		paid_amount DECIMAL(14, 2) DEFAULT 0 COMMENT '已支付金额',
 		balance_amount DECIMAL(14, 2) COMMENT '结余金额',
@@ -303,6 +307,7 @@ TABLE_STATEMENTS = [
 		UNIQUE KEY uk_weighbill (weighbill_id),
 		INDEX idx_contract_no (contract_no),
 		INDEX idx_driver_name (driver_name),
+		INDEX idx_payee_id (payee_id),
 		INDEX idx_payment_status (payment_status),
 		INDEX idx_created_at (created_at)
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='磅单结余明细表';
