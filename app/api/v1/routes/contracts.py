@@ -338,7 +338,7 @@ async def list_contracts(
     )
 
 
-@router.get("/{contract_id}", response_model=ContractOut)
+@router.get("/id/{contract_id:int}", response_model=ContractOut)
 async def get_contract(
     contract_id: int,
     service: ContractService = Depends(get_contract_service)
@@ -350,7 +350,7 @@ async def get_contract(
     return detail
 
 
-@router.put("/{contract_id}", response_model=dict)
+@router.put("/id/{contract_id:int}", response_model=dict)
 async def update_contract(
     contract_id: int,
     contract_data: Optional[str] = Form(None, description="合同数据JSON字符串"),
@@ -480,7 +480,7 @@ async def update_contract(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/{contract_id}/image")
+@router.get("/id/{contract_id:int}/image")
 async def get_contract_image(
         contract_id: int,
         service: ContractService = Depends(get_contract_service)
@@ -513,7 +513,7 @@ async def get_contract_image(
         raise HTTPException(status_code=500, detail=f"获取图片失败: {str(e)}")
 
 
-@router.delete("/{contract_id}")
+@router.delete("/id/{contract_id:int}")
 async def delete_contract(
     contract_id: int,
     service: ContractService = Depends(get_contract_service)
