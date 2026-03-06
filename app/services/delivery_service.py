@@ -808,6 +808,9 @@ class DeliveryService:
                             item.get('delivery_order_image')
                         )
 
+                        # 确保返回数据中包含 contract_no 字段（可能为 None）
+                        item['contract_no'] = item.get('contract_no')
+
                         data.append(item)
 
                     return {
