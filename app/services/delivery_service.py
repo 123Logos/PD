@@ -81,7 +81,8 @@ class DeliveryService:
             return Decimal('150')
         return Decimal('0')
 
-    def _calculate_price(self, factory_name: str, product_name: str, quantity: Decimal) -> tuple:
+    def _calculate_price(self, factory_name: str, product_name: str, quantity: Decimal,
+                         report_date: Optional[str] = None) -> tuple:
         """
         关联合同计算价格
         返回: (contract_no, unit_price, total_amount)
@@ -97,6 +98,7 @@ class DeliveryService:
                     if not customer:
                         return None, None, None
 
+                    effective_date = report_date or datetime.today().date().isoformat()
                     cur.execute("""
                         SELECT c.contract_no, p.unit_price
                         FROM pd_contracts c
@@ -104,11 +106,11 @@ class DeliveryService:
                         WHERE c.smelter_company = %s
                         AND p.product_name = %s
                         AND c.status = '生效中'
-                        AND c.contract_date <= CURDATE()
-                        AND (c.end_date IS NULL OR c.end_date >= CURDATE())
+                        AND c.contract_date <= %s
+                        AND (c.end_date IS NULL OR c.end_date >= %s)
                         ORDER BY c.created_at DESC, p.sort_order ASC
                         LIMIT 1
-                    """, (factory_name, product_name))
+                    """, (factory_name, product_name, effective_date, effective_date))
 
                     contract = cur.fetchone()
                     if not contract:
@@ -374,7 +376,8 @@ class DeliveryService:
                     contract_no, unit_price, total_amount = self._calculate_price(
                         target_factory,
                         products[0],
-                        Decimal(str(quantity))
+                        Decimal(str(quantity)),
+                        data.get('report_date')
                     )
                     logger.info(
                         f"【DEBUG】价格结果: contract_no={contract_no}, unit_price={unit_price}, total_amount={total_amount}")
